@@ -1,0 +1,54 @@
+button {
+    font-family: "Segoe UI", sans-serif;
+    font-size: 14px;
+  }
+  
+.primary-button {
+    color: white;
+    font-weight: 600;
+    background-color: #0078d4;
+    border: 1px solid #0078d4;
+    border-radius: 2px;
+    padding: 6.25px 15px;
+    position:absolute;
+    width: 100%;
+    transition: all 0.3s cubic-bezier(0.1, 0.9, 0.2, 1);
+    outline: none;
+
+    display: block;
+    text-align: center;
+}
+
+.primary-button:hover {
+    background-color: #005ba1;
+    cursor: pointer; 
+}
+
+.primary-button:active {
+    background-color: #0894ff;
+}
+
+.default-button {
+    color: white;
+    background-color: transparent;
+    border: 1px solid white;
+    border-radius: 2px;
+    padding: 6.25px 15px;
+    position:absolute;
+    width: 100%;
+    transition: all 0.3s cubic-bezier(0.1, 0.9, 0.2, 1);
+    outline: none;
+}
+
+.default-button:hover {
+    background-color: #0078d4;
+    border: 1px solid #0078d4;
+}
+
+.default-button:active {
+    background-color: #005ba1;
+}
+
+div {
+    border: none
+}

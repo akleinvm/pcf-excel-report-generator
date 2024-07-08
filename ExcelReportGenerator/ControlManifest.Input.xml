@@ -2,9 +2,10 @@
 <manifest>
   <control namespace="CustomControl" constructor="ExcelReportGenerator" version="0.0.1" display-name-key="ExcelReportGenerator" description-key="ExcelReportGenerator description" control-type="standard" >
     <external-service-usage enabled="false"></external-service-usage>
-    <property name="Template" display-name-key="Template" description-key="The excel template file in base64 format" of-type="SingleLine.Text" usage="bound" required="true" />
+    <property name="Template" display-name-key="Template" description-key="The excel template file in base64 format" of-type="SingleLine.TextArea" usage="input" required="true" />
     <resources>
       <code path="index.ts" order="1"/>
+      <css path="css/style.css" order="1"/>
     </resources>
   </control>
 </manifest>
