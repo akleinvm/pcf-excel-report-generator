@@ -71,7 +71,7 @@ export class ExcelReportGenerator implements ComponentFramework.StandardControl<
 
         const workbook = this.convertBlobToWorkbook(blob);
         const updatedWorkbook = this.addRecordsToTable(await workbook, "", "");
-        const updatedBlob = this.convertWorkbookToBlob(await updatedWorkbook);
+        const updatedBlob = this.convertWorkbookToBlob(await updatedWorkbook, contentType);
 
         this.downloadBlob(await updatedBlob, fileName);
 
@@ -100,9 +100,7 @@ export class ExcelReportGenerator implements ComponentFramework.StandardControl<
         URL.revokeObjectURL(blobUrl)
     }
 
-    private async convertWorkbookToBlob(workbook: ExcelJS.Workbook): Promise<Blob> {
-        const contentType = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet";
-
+    private async convertWorkbookToBlob(workbook: ExcelJS.Workbook, contentType: string): Promise<Blob> {
         const blob = await workbook.xlsx.writeBuffer();
         return new Blob([blob], {type: contentType})
     }
@@ -123,13 +121,13 @@ export class ExcelReportGenerator implements ComponentFramework.StandardControl<
     private async generateExcelReport(workbook: ExcelJS.Workbook, payloadJsonString: string): Promise<void>
     {
         try {
-            const updatedBlob = await this.addRecordsToExcelTable(workbook, tableName, payloadJsonString);
+            const updatedBlob = await this.addRecordsToExcelTable(workbook, "tableName", payloadJsonString);
 
             const blobUrl = URL.createObjectURL(updatedBlob);
 
             const downloadLink = document.createElement('a');
             downloadLink.href = blobUrl;
-            downloadLink.download = fileName;
+            downloadLink.download = "";//fileName;
 
             this._container.appendChild(downloadLink);
 
