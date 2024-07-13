@@ -1,5 +1,6 @@
 import { IInputs, IOutputs } from "./generated/ManifestTypes";
 import * as ExcelJS from 'exceljs';
+import * as JSZip from 'jszip';
 
 export class ExcelReportGenerator implements ComponentFramework.StandardControl<IInputs, IOutputs> {
     private _button: HTMLButtonElement;
@@ -47,7 +48,7 @@ export class ExcelReportGenerator implements ComponentFramework.StandardControl<
     private async onClick(): Promise<void> 
     {
         const fileName = "export.xlsx";
-        const contentType = 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet';
+        const zipMimeType = "application/zip";
 
         const base64String = this._context.parameters.Template.raw;
         if (!base64String) {
@@ -63,29 +64,48 @@ export class ExcelReportGenerator implements ComponentFramework.StandardControl<
             return;
         }
         
-        const blob = this.convertBase64ToBlob(base64String, contentType);
-        if (!blob || blob.size === 0) {
-            console.error("Failed to create Blob from base64 string.");
-            alert("Failed to create the file");
+        const zipBuffer = this.convertBase64ToArrayBuffer(base64String);
+        
+        const test = new ExcelSharedStrings();
+        const zip = new JSZip();
+        await zip.loadAsync(zipBuffer);
+        
+        const files = new Map<string, string>();
+
+        const zipFolder = zip.folder("");
+        if(zipFolder) {
+            for(const [relativePath, file] of Object.entries(zipFolder.files)) {
+                const content = await file.async("binarystring");
+                files.set(relativePath, content);
+            }
         }
 
-        const workbook = this.convertBlobToWorkbook(blob);
-        const updatedWorkbook = this.addRecordsToTable(await workbook, "", "");
-        const updatedBlob = this.convertWorkbookToBlob(await updatedWorkbook, contentType);
+        const xmlSharedStrings = files.get("xl/sharedStrings.xml") ?? "";
 
-        this.downloadBlob(await updatedBlob, fileName);
+        const sharedStrings = new ExcelSharedStrings();
+        sharedStrings.fromXML(xmlSharedStrings);
+        sharedStrings.addString("this is added just now");
 
-/*
-        try {
-            await this.generateExcelReport(fileName, payloadJsonString);
-        } catch (error) {
-            console.error("Error generating Excel report:", error);
-            alert("Failed to generate the Excel report:" + (error instanceof Error ? error.message: String(error)));
-        }*/
-        
+        files.set("xl/sharedStrings.xml", sharedStrings.toXML());
+
+        const updatedZip = new JSZip();
+        for(const [relativePath, file] of files) {
+          updatedZip.file(relativePath, file)
+        }
+
+        const blob = updatedZip.generateAsync({type:"blob", compression: "DEFLATE", compressionOptions: {level: 9}})
+        this.downloadBlob("export.zip", await blob);
+
     }
 
-    private downloadBlob(blob: Blob, fileName: string) {
+    private convertBase64ToArrayBuffer(base64Content: string): ArrayBuffer {
+        const binaryString = atob(base64Content);
+        const bytes = Uint8Array.from(binaryString, char => char.charCodeAt(0));
+
+        return bytes.buffer
+    }
+
+    private downloadBlob(fileName: string, blob: Blob): void {
         const blobUrl = URL.createObjectURL(blob);
 
         const downloadLink = document.createElement('a');
@@ -99,112 +119,85 @@ export class ExcelReportGenerator implements ComponentFramework.StandardControl<
         this._container.removeChild(downloadLink);
         URL.revokeObjectURL(blobUrl)
     }
+}
 
-    private async convertWorkbookToBlob(workbook: ExcelJS.Workbook, contentType: string): Promise<Blob> {
-        const blob = await workbook.xlsx.writeBuffer();
-        return new Blob([blob], {type: contentType})
-    }
+class ExcelSharedStrings {
+  private _count: number;
+  private _uniqueCount: number;
+  private _stringsMap: Map<string, number>;
 
-    private async convertBlobToWorkbook(blob: Blob): Promise<ExcelJS.Workbook> {
-        const workbook = new ExcelJS.Workbook();
+  constructor(count: number = 0, uniqueCount: number = 0, strings: string[] = []) {
+    this._count = count;
+    this._stringsMap = new Map();
+  }
 
-        const arrayBuffer = await blob.arrayBuffer();
-        await workbook.xlsx.load(arrayBuffer);
+  get count(): number {
+    return this._count;
+  }
 
-        return workbook
-    }
+  get uniqueCount(): number {
+    return this._stringsMap.size;
+  }
 
-    private async addRecordsToTable(workbook: ExcelJS.Workbook, tableName: string, newRecords: string): Promise<ExcelJS.Workbook> {
-        return workbook
-    }
+  get strings(): string[] {
+    return Array.from(this._stringsMap.keys());
+  }
 
-    private async generateExcelReport(workbook: ExcelJS.Workbook, payloadJsonString: string): Promise<void>
-    {
-        try {
-            const updatedBlob = await this.addRecordsToExcelTable(workbook, "tableName", payloadJsonString);
+  fromXML(xmlString: string): void {
+    const parser = new DOMParser();
+    const xmlDoc = parser.parseFromString(xmlString, 'text/xml');
 
-            const blobUrl = URL.createObjectURL(updatedBlob);
+    const sstElement = xmlDoc.documentElement;
+    const count = parseInt(sstElement.getAttribute('count') || '0', 10);
+    const uniqueCount = parseInt(sstElement.getAttribute('uniqueCount') || '0', 10);
 
-            const downloadLink = document.createElement('a');
-            downloadLink.href = blobUrl;
-            downloadLink.download = "";//fileName;
-
-            this._container.appendChild(downloadLink);
-
-            downloadLink.click();
-
-            this._container.removeChild(downloadLink);
-            //URL.revokeObjectURL(blobUrl)
-        } catch(error) {
-            console.error("Error in generateExcelReport:", error);
-            throw error;
-        }
-    }
+    this._count = count;
+    this._uniqueCount = uniqueCount;
     
-    private convertBase64ToBlob(base64String: string, contentType: string) {
-        const binaryString = atob(base64String);
-        const uint8Array = Uint8Array.from(binaryString, char => char.charCodeAt(0));
-
-        return new Blob([uint8Array], {type: contentType})
+    const siElements = xmlDoc.getElementsByTagName('si');
+    this._stringsMap.clear();
+    for(let i=0; i<siElements.length; i++) {
+      const tElement = siElements[i].getElementsByTagName('t')[0];
+      if(tElement && tElement.textContent) {
+        this._stringsMap.set(tElement.textContent, i)
+      }
     }
+  }
 
-    private async addRecordsToExcelTable(workbook: ExcelJS.Workbook, tableName: string, newRowsJson: string): Promise<Blob>
-    {
-        const worksheet = workbook.addWorksheet("My Sheet");
+  toXML(): string {
+    const xmlHeaderString = '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>';
+    const doc = new DOMParser().parseFromString('<sst/>', 'text/xml');
 
-        worksheet.columns = [
-            {header: 'Id', key: 'id', width: 10},
-            {header: 'Name', key: 'name', width: 32}, 
-            {header: 'D.O.B.', key: 'dob', width: 15,}
-          ];
-          
-        worksheet.addRow({id: 1, name: 'John Doe', dob: new Date(1970, 1, 1)});
-        worksheet.addRow({id: 2, name: 'Jane Doe', dob: new Date(1965, 1, 7)});
+    const sstElement = doc.documentElement;
 
-/*
-        const worksheet = workbook.getWorksheet(1);
-        if(!worksheet) {
-            throw new Error("Worksheet not found");
-        }
+    this._stringsMap.forEach((index, text) => {
+      const siElement = doc.createElementNS('', 'si',);
+      const tElement = doc.createElement('t');
+      tElement.textContent = text;
+      siElement.appendChild(tElement);
+      sstElement.appendChild(siElement);
+    });
 
-        const table = worksheet?.getTable(tableName);
-        if(!table) {
-            throw new Error(`Table with name ${tableName} not found`);
-        }
+    sstElement.setAttribute("xmlns", "http://schemas.openxmlformats.org/spreadsheetml/2006/main");
+    sstElement.setAttribute('count', this._count.toString());
+    sstElement.setAttribute('uniqueCount', this._uniqueCount.toString());
 
-        let newRows: any[];
-        try {
-            newRows = JSON.parse(newRowsJson);
-            console.log("Parsed newRows:", newRows);
+    const xmlSerializer = new XMLSerializer();
+    return xmlHeaderString + xmlSerializer.serializeToString(doc)
+  }
 
-            if(!Array.isArray(newRows)) {
-                throw new Error("newRows is not an array");
-            }
-        } catch(error) {
-            console.error("Error parsing newRowsJson:", error);
-            throw new Error(`Invalid JSON for newRows: ${error}`);
-        }
-
-        if(newRows.length === 0) {
-            console.warn("newRows is empty");
-        }
-
-        newRows.forEach((newRow, index) => {
-            if(newRow === null || typeof newRow !== 'object') {
-                console.warn(`Invalid row at index ${index}:`, newRow);
-                return;
-            }
-            try {
-                table.addRow(Object.values(newRow));
-            } catch(error) {
-                console.error(`Error adding row at index ${index}:`, error);
-            }
-        });
-*/
-
-        console.log("Finished adding rows");
-        const updatedWorkbookBlob = await workbook.xlsx.writeBuffer();
-        console.log("Workbook updated and converted to blob");
-        return new Blob([updatedWorkbookBlob], {type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"})
+  addString(string: string): void {
+    if(!this._stringsMap.has(string)) {
+      this._stringsMap.set(string, this._stringsMap.size);
+      this._uniqueCount++
     }
+  }
+
+  getStringIndex(string: string): number {
+    return this._stringsMap.get(string) ?? -1
+  }
+
+  setCount(count: number): void {
+    this._count = count
+  }
 }
