@@ -1,6 +1,6 @@
 <?xml version="1.0" encoding="utf-8" ?>
 <manifest>
-  <control namespace="CustomControl" constructor="ExcelReportGenerator" version="0.0.3" display-name-key="ExcelReportGenerator" description-key="ExcelReportGenerator description" control-type="standard" >
+  <control namespace="CustomControl" constructor="ExcelReportGenerator" version="0.0.11" display-name-key="ExcelReportGenerator" description-key="ExcelReportGenerator description" control-type="standard" >
     <external-service-usage enabled="false"></external-service-usage>
     <property name="Template" display-name-key="Template" description-key="The excel template file in base64 format" of-type="SingleLine.TextArea" usage="input" required="true" />
     <property name="Payload" display-name-key="Payload" description-key="The records to be added on the table in JSON string format" of-type="SingleLine.TextArea" usage="input" required="true" />

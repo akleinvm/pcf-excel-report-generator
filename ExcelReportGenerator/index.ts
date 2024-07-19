@@ -1,10 +1,10 @@
-import { profileEnd } from "console";
 import { IInputs, IOutputs } from "./generated/ManifestTypes";
-import * as ExcelJS from 'exceljs';
 import * as JSZip from 'jszip';
 
 interface PowerAppsObject {Value: string}
 interface PowerAppsArray {Value: Array<PowerAppsObject>}
+interface CellFormat {Type: string | null, Style: string | null}
+interface CellObject {Value: number, Format: CellFormat}
 
 export class ExcelReportGenerator implements ComponentFramework.StandardControl<IInputs, IOutputs> {
   private _button: HTMLButtonElement;
@@ -51,32 +51,19 @@ export class ExcelReportGenerator implements ComponentFramework.StandardControl<
   //Functions
   private async onClick(): Promise<void> 
   {
+      console.log('Initializing constants...');
       const fileName = "export.xlsx";
-      const zipMimeType = "application/zip";
-
-      console.profile();
-      const base64String = this._context.parameters.Template.raw;
-      if (!base64String) {
-          console.error("Base64 string is empty");
-          alert("No data available for export");
-          return;
-      }
-      
-      const payloadJsonString = this._context.parameters.Payload.raw;
-      if (!payloadJsonString) {
-          console.error("Payload JSON string is empty");
-          alert("No payload data available for export");
-          return;
-      }
-      
-      const columnTypes: Array<string> = JSON.parse(this._context.parameters.ColumnTypes.raw ?? "");
-
       const sheetNo = this._context.parameters.SheetNo.raw ?? 1;
       const startRowIndex = this._context.parameters.StartRowIndex.raw ?? 1;
       const startColumnIndex = this._context.parameters.StartColumnIndex.raw ?? 1;
+
+      console.log('Parsing template base64 string...');
+      const base64String: string = this._context.parameters.Template.raw ?? '';
+      if(base64String === '') throw new Error("template is null or undefined");
+
+      const zipBuffer: ArrayBuffer = this.convertBase64ToArrayBuffer(base64String);
       
-      const zipBuffer = this.convertBase64ToArrayBuffer(base64String);
-      
+      console.log('Retrieving files from template...');
       const zip = new JSZip();
       await zip.loadAsync(zipBuffer);
       
@@ -85,54 +72,89 @@ export class ExcelReportGenerator implements ComponentFramework.StandardControl<
       const zipFolder = zip.folder("");
       if(zipFolder) {
           for(const [relativePath, file] of Object.entries(zipFolder.files)) {
-              const content = await file.async("binarystring");
+              const content = await file.async('binarystring');
               files.set(relativePath, content);
           }
       }
-      
 
-      const xmlSharedStrings = files.get("xl/sharedStrings.xml") ?? "";
+      console.log('Parsing sharedStrings.xml...');
+      const xmlSharedStrings = files.get('xl/sharedStrings.xml') ?? '';
+      if(xmlSharedStrings === '') throw new Error('sharedStrings is null or undefined');
       const sharedStrings = new ExcelSharedStrings(xmlSharedStrings);
+
+      console.log('Parsing styles.xml...');
+      const xmlStyles = files.get("xl/styles.xml") ?? '';
+      if(xmlStyles === '') throw new Error('styles is null or undefined');
+      const styles = new ExcelStyles(xmlStyles);
+
+      console.log('Generating columnTypes...');
+      const columnTypesString: string = this._context.parameters.ColumnTypes.raw ?? '';
+      const columnTypesPAObject: Array<PowerAppsObject> = JSON.parse(columnTypesString);
+
+      const cellFormatsMap = new Map<string, CellFormat> ([
+        ['String', {Type: 's', Style: null}],
+        ['Number', {Type: null, Style: null}],
+        ['Date', {Type: null, Style: styles.getFormatIndex(14)}],
+        ['Boolean', {Type: 'b', Style: null}]
+      ]);
+      const cellFormatDefault: CellFormat = {Type: 's', Style: null};
+
+      const columnTypes = new Array<string>;
+      columnTypesPAObject.forEach(paObject => {
+        columnTypes.push(paObject.Value);
+      });
       
-      const payload: Array<PowerAppsArray> = JSON.parse(payloadJsonString);
-      const array: Array<Array<number>> = [];
+      console.log('Parsing payload...');
+      const payloadString: string = this._context.parameters.Payload.raw ?? "";
+      if(payloadString === '') throw new Error('payload is null or undefined');
+      const payloadPAObject: Array<PowerAppsArray> = JSON.parse(payloadString); 
+      const payload: Array<Array<CellObject>> = [];
+
       const excelEpochTime = new Date(Date.UTC(1899, 11, 30)).getTime();
-      const daysToMilliseconds = 86400000;
-      for(let i = 0; i < payload.length; i++) {
-        const row = payload[i];
-        const cells: Array<number> = [];
+      const millisecondsToDays = 1/86400000;
+      for(let i = 0; i < payloadPAObject.length; i++) {
+        const row = payloadPAObject[i];
+        const cells: Array<CellObject> = [];
 
         for(let j = 0; j < row.Value.length; j++) {
           const cellContent = row.Value[j].Value;
+          const cellType = columnTypes[j];
           let value: number;
-          switch(columnTypes[j]) {
+          switch(cellType) {
             case "String": value = sharedStrings.getStringIndex(cellContent); break;
             case "Number": value = Number(cellContent); break;
-            case "Date": value = (new Date(cellContent).getTime() - excelEpochTime) / daysToMilliseconds + 1; break;
+            case "Date": value = (new Date(cellContent).getTime() - excelEpochTime) * millisecondsToDays + 1; break;
             case "Boolean": value = Number(cellContent === 'true'); break;
             default: value = sharedStrings.getStringIndex(cellContent); break;
           }
-          cells.push(value);
+          cells.push({Value: value, Format: cellFormatsMap.get(cellType) ?? cellFormatDefault});
         }
-        array.push(cells);
+        payload.push(cells);
       }
 
+      console.log(`Parsing sheet${sheetNo}.xml...`);
       const xmlWorksheet = files.get(`xl/worksheets/sheet${sheetNo}.xml`) ?? "";
+      if(xmlWorksheet === '') throw new Error('worksheet is null or undefined');
       const worksheet = new ExcelWorksheet(xmlWorksheet);
 
-      worksheet.addRows(array, columnTypes, 15, 15);
-        
-      files.set("xl/sharedStrings.xml", sharedStrings.toString());
-      files.set("xl/worksheets/sheet2.xml", worksheet.toString());
+      console.log(`Adding rows to sheet${sheetNo}...`);
+      worksheet.addRows(payload, startRowIndex, startColumnIndex);
       
+      console.log('Updated file contents...');
+      files.set("xl/sharedStrings.xml", sharedStrings.toString());
+      files.set("xl/styles.xml", styles.toString());
+      files.set("xl/worksheets/sheet2.xml", worksheet.toString());
 
+      console.log('Generating blob...');
       const updatedZip = new JSZip();
       for(const [relativePath, file] of files) {
-        updatedZip.file(relativePath, file)
+        updatedZip.file(relativePath, file);
       }
 
       const blob = updatedZip.generateAsync({type:"blob", compression: "DEFLATE", compressionOptions: {level: 9}})
-      this.downloadBlob("export.zip", await blob);
+
+      console.log('Downloading blob...');
+      this.downloadBlob(fileName, await blob);
 
   }
 
@@ -164,14 +186,12 @@ class ExcelSharedStrings {
   private _xmlDocument: XMLDocument;
   private _sstElement: Element;
   private _namespace: string;
-  private _count: number;
   private _stringsMap: Map<string, number>;
 
   constructor(xmlString: string) {
     this._xmlDocument = new DOMParser().parseFromString(xmlString, 'text/xml');
     this._sstElement = this._xmlDocument.getElementsByTagName('sst')[0];
     this._namespace = this._sstElement.getAttribute('xmlns') ?? '';
-    this._count = Number(this._sstElement.getAttributeNS(this._namespace, 'count'));
     this._stringsMap = new Map();
     
     const siElements = this._sstElement.getElementsByTagName('si');
@@ -184,7 +204,6 @@ class ExcelSharedStrings {
   }
 
   toString(): string {
-    this._sstElement.setAttribute('count', this._count.toString());
     this._sstElement.setAttribute('uniqueCount', this._stringsMap.size.toString());
 
     const xmlSerializer = new XMLSerializer();
@@ -206,17 +225,51 @@ class ExcelSharedStrings {
 
     return stringIndex
   }
-
-  setCount(count: number): void {
-    this._count = count
-  }
-
-  incrementCount(): number {
-    return this._count++
-  }
 }
 
-interface ColumnFormat {Type: string, Attribute: string | null}
+class ExcelStyles {
+  private _xmlDocument: Document;
+  private _styleSheet: Element;
+  private _namespace: string;
+  private _cellFormats: Element;
+  private _cellFormatArray: Array<number>;
+
+  constructor(xmlString: string) {
+    this._xmlDocument = new DOMParser().parseFromString(xmlString, "text/xml"); 
+    this._styleSheet = this._xmlDocument.getElementsByTagName('styleSheet')[0]; 
+    this._namespace = this._styleSheet.getAttribute('xmlns') ?? ""; 
+
+    this._cellFormats = this._styleSheet.getElementsByTagName('cellXfs')[0]; 
+    const formats = this._cellFormats.getElementsByTagName('xf'); 
+    
+    this._cellFormatArray = [];
+    for (let i = 0; i < formats.length; i++) {
+      const format = formats[i];
+      const formatId = Number(format.getAttribute('numFmtId'));
+      this._cellFormatArray.push(formatId);
+    }
+    console.log(this._cellFormatArray);
+  }
+
+  getFormatIndex(formatId: number): string {
+    let formatIndex = this._cellFormatArray.indexOf(formatId).toString();
+
+    if(formatIndex === '-1') {
+      formatIndex = this._cellFormatArray.length.toString();
+      this._cellFormatArray.push(formatId);
+      const xfElement = this._xmlDocument.createElementNS(this._namespace, 'xf');
+      xfElement.setAttribute('numFmtId', formatId.toString());
+      this._cellFormats.appendChild(xfElement);
+    }
+
+    return formatIndex
+  }
+
+  toString() {
+    const xmlSerializer = new XMLSerializer();
+    return xmlSerializer.serializeToString(this._xmlDocument);
+  }
+}
 
 class ExcelWorksheet {
   private _xmlDoc: Document;
@@ -224,29 +277,14 @@ class ExcelWorksheet {
   private _namespace: string;
   private _sheetData: Element;
 
-  private _dimension: Element;
-  private _minRowIndex: number;
-  private _minColumnIndex: number;
-  private _maxRowIndex: number;
-  private _maxColumnIndex: number;
-
   private _rowsMap: Map<number, Element>;
   private _cellsMap: Map<string, Element>;
-  private _columnTypesMap: Map<string, ColumnFormat>; 
 
   constructor(xmlString: string) {
     this._xmlDoc = new DOMParser().parseFromString(xmlString, "text/xml");
 
     this._worksheet = this._xmlDoc.getElementsByTagName('worksheet')[0];
     this._namespace = this._worksheet.getAttribute('xmlns') ?? "";
-    
-    this._dimension = this._xmlDoc.getElementsByTagName("dimension")[0];
-    const dimensionRef = this._dimension.getAttribute('ref') ?? '';
-    const dimensionIndexes = dimensionRef.match(/^([A-Z]+)(\d+):([A-Z]+)(\d+)$/) ?? ['', '1', '1', '1', '1'];
-    this._minRowIndex = Number(dimensionIndexes[2]);
-    this._minColumnIndex = ExcelColumnConverter.columnToNumber(dimensionIndexes[1]);
-    this._maxRowIndex = Number(dimensionIndexes[4]);
-    this._maxColumnIndex = ExcelColumnConverter.columnToNumber(dimensionIndexes[3]);
 
     this._sheetData = this._xmlDoc.getElementsByTagName("sheetData")[0];
     this._rowsMap = new Map();
@@ -263,16 +301,9 @@ class ExcelWorksheet {
       this._cellsMap.set(cell.getAttribute('r') ?? '', cell);
     }
 
-    this._columnTypesMap = new Map<string, ColumnFormat>([
-      ['String', {Type: "s", Attribute: "t"}],
-      ['Boolean', {Type: "b", Attribute: "t"}],
-      ['Date', {Type: "5", Attribute: "s"}],
-      ['Number', {Type: "n", Attribute: null}],
-    ])
-
   }
 
-  public addRows(rows: Array<Array<number>>, columnTypes: Array<string>, rowStartIndex: number, columnStartIndex: number): void {
+  public addRows(rows: Array<Array<CellObject>>, rowStartIndex: number, columnStartIndex: number): void {
     for(let i = 0; i < rows.length; i++) {
       const rowIndex = rowStartIndex + i;
       const row = rows[i];
@@ -282,7 +313,6 @@ class ExcelWorksheet {
         rowElement = this._xmlDoc.createElementNS(this._namespace, 'row');
         rowElement.setAttribute('r', rowIndex.toString());
         rowElement.setAttribute('spans', `${columnStartIndex}:${columnStartIndex + row.length}`);
-        rowElement.setAttribute('x14ac:dyDescent', "0.3");
         this._sheetData.appendChild(rowElement);
         this._rowsMap.set(rowIndex, rowElement);
       } else {
@@ -299,36 +329,34 @@ class ExcelWorksheet {
         if(!cellElement) {
           cellElement = this._xmlDoc.createElementNS(this._namespace, 'c');
           cellElement.setAttribute('r', cellReference);
-          
         }
         
-        const columnFormat = this._columnTypesMap.get(columnTypes[j]) ?? {Type: "s", Attribute: "t"};
-        if(columnFormat.Attribute != null) cellElement.setAttribute(columnFormat.Attribute, columnFormat.Type);
+        const cellStyle = row[j].Format.Style;
+        if(cellStyle) cellElement.setAttribute('s', cellStyle ?? "");
+
+        const cellType = row[j].Format.Type;
+        if(cellType) cellElement.setAttribute('t', cellType ?? "");
         
         const valueElement = this._xmlDoc.createElementNS(this._namespace, 'v');
-        valueElement.textContent = row[j].toString();
+        valueElement.textContent = row[j].Value.toString();
         cellElement.replaceChildren(valueElement);
         rowElement.appendChild(cellElement);
       }
     }
-    this._maxRowIndex = Math.max(this._maxRowIndex, rowStartIndex + rows.length);
-    this._maxColumnIndex = Math.max(this._maxColumnIndex, columnStartIndex + columnTypes.length - 1);
   }
 
   public toString(): string {
-    const minDimensionRef = ExcelColumnConverter.numberToColumn(this._minColumnIndex) + this._minRowIndex;
-    const maxDimensionRef = ExcelColumnConverter.numberToColumn(this._maxColumnIndex) + this._maxRowIndex;
-    this._dimension.setAttribute('ref', `${minDimensionRef}:${maxDimensionRef}`);
     return new XMLSerializer().serializeToString(this._xmlDoc);
   }
 }
+
+
 
 class ExcelColumnConverter {
   private static columnToNumberMap: Map<string, number> = new Map();
   private static numberToColumnMap: Map<number, string> = new Map();
 
   static columnToNumber(column: string): number {
-      // Check if the column number is already calculated
       if (this.columnToNumberMap.has(column)) {
           return this.columnToNumberMap.get(column)!;
       }
@@ -338,7 +366,6 @@ class ExcelColumnConverter {
         number = number * 26 + (column.charCodeAt(i) - 'A'.charCodeAt(0) + 1);
       }
 
-      // Store the calculated column number in the map
       this.columnToNumberMap.set(column, number);
       
       if (!this.numberToColumnMap.has(number)) {
@@ -349,7 +376,6 @@ class ExcelColumnConverter {
   }
 
   static numberToColumn(number: number): string {
-      // Check if the column letter is already calculated
       if (this.numberToColumnMap.has(number)) {
           return this.numberToColumnMap.get(number)!;
       }
@@ -362,7 +388,6 @@ class ExcelColumnConverter {
           number = Math.floor(number / 26);
       }
 
-      // Store the calculated column letter in the map
       this.numberToColumnMap.set(number, column);
 
       if (!this.columnToNumberMap.has(column)) {
