@@ -7,6 +7,7 @@
     <property name="SheetNo" display-name-key="SheetNo" description-key="SheetNo" of-type="Whole.None" usage="input" required="true" />
     <property name="StartRowIndex" display-name-key="StartRowIndex" description-key="The row number where it will start populating" of-type="Whole.None" usage="input" required="true" />
     <property name="StartColumnIndex" display-name-key="StartColumnIndex" description-key="The column number where it will start populating" of-type="Whole.None" usage="input" required="true" />
+    <property name="ColumnTypes" display-name-key="ColumnTypes" description-key="XXX" of-type="SingleLine.TextArea" usage="input" required="true" />
     <resources>
       <code path="index.ts" order="1"/>
       <css path="css/style.css" order="1"/>
