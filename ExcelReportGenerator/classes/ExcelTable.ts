@@ -9,24 +9,24 @@ export class ExcelTable {
     private _autoFilterElement: Element;
   
     public fromXML(xmlString: string) {
-      this._xmlDocument = new DOMParser().parseFromString(xmlString, "text/xml"); console.log(this._xmlDocument);
-      this._tableElement = this._xmlDocument.getElementsByTagName('table')[0]; console.log(this._tableElement);
-      const [minCellRef, maxCellRef] = this._tableElement.getAttribute('ref')?.split(':') ?? ['A1', 'A1']; console.log([minCellRef, maxCellRef]);
-      this._minCellIndex = ExcelColumnConverter.cellRefToIndex(minCellRef); console.log(this._minCellIndex);
-      this._maxCellIndex = ExcelColumnConverter.cellRefToIndex(maxCellRef); console.log(this._maxCellIndex);
-      this._autoFilterElement = this._tableElement.getElementsByTagName('autoFilter')[0]; console.log(this._autoFilterElement);
+      this._xmlDocument = new DOMParser().parseFromString(xmlString, "text/xml");
+      this._tableElement = this._xmlDocument.getElementsByTagName('table')[0];
+      const [minCellRef, maxCellRef] = this._tableElement.getAttribute('ref')?.split(':') ?? ['A1', 'A1'];
+      this._minCellIndex = ExcelColumnConverter.cellRefToIndex(minCellRef);
+      this._maxCellIndex = ExcelColumnConverter.cellRefToIndex(maxCellRef);
+      this._autoFilterElement = this._tableElement.getElementsByTagName('autoFilter')[0];
     }
   
     public get minCellIndex(): CellIndex {
-      return this._minCellIndex
+      return this._minCellIndex;
     }
   
     public get maxCellIndex(): CellIndex {
-      return this.maxCellIndex
+      return this._maxCellIndex;
     }
   
     public set maxCellIndex(cellIndex: CellIndex) {
-      this._maxCellIndex
+      this._maxCellIndex = cellIndex;
     }
   
     public toString(): string {

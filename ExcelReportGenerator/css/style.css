@@ -10,6 +10,7 @@ button {
     border: 1px solid #0078d4;
     border-radius: 2px;
     padding: 6.25px 15px;
+    box-sizing: border-box;
     position:absolute;
     width: 100%;
     transition: all 0.3s cubic-bezier(0.1, 0.9, 0.2, 1);

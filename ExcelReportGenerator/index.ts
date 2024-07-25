@@ -140,13 +140,13 @@ export class ExcelReportGenerator implements ComponentFramework.StandardControl<
       if(tableNo > 0) {
         console.log(`Parsing table${tableNo}.xml...`);
         const xmlTable = files.get(`xl/tables/table${tableNo}.xml`) ?? '';
-        table.fromXML(xmlTable);
+        table.fromXML(xmlTable); console.log(table);
 
         startRowIndex = table.maxCellIndex.RowIndex;
         startColumnIndex = table.minCellIndex.RowIndex;
         
         console.log('Updating table boundary...');
-        table.maxCellIndex = {RowIndex: startRowIndex + payload.length, ColumnIndex: startColumnIndex}
+        table.maxCellIndex = {RowIndex: startRowIndex + payload.length, ColumnIndex: table.maxCellIndex.ColumnIndex};
 
         files.set(`xl/tables/table${tableNo}.xml`, table.toString());
       }
